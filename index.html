@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Espacio VR — Avatar IA (Convai)</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0a0c10" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+    background: #0a0c10; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #eef1f6; }
+  #scene-canvas { position: fixed; inset: 0; display: block; }
+
+  #overlay { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column;
+    justify-content: space-between; }
+  #overlay * { pointer-events: auto; }
+
+  .panel { background: rgba(16, 19, 26, 0.82); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px 18px; }
+
+  #setup-panel { margin: 16px auto 0; max-width: 480px; width: calc(100% - 32px); }
+  #setup-panel h1 { font-size: 15px; font-weight: 600; margin: 0 0 10px; letter-spacing: .01em; }
+  #setup-panel label { display: block; font-size: 11px; color: #9aa4b2; margin: 10px 0 4px; }
+  #setup-panel input { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.12); background: #0d1017; color: #eef1f6; font-size: 13px; }
+  #setup-panel .hint { font-size: 10.5px; color: #6b7480; margin-top: 6px; line-height: 1.4; }
+  #setup-status { font-size: 11px; margin-top: 8px; color: #7fd88f; min-height: 14px; }
+
+  #hud-bottom { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 22px; }
+
+  #subtitle-panel { max-width: 620px; width: calc(100% - 32px); min-height: 20px; text-align: center;
+    font-size: 14px; line-height: 1.45; }
+  #subtitle-panel .who { font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: #7fb2ff; display: block; margin-bottom: 4px; }
+  #subtitle-panel.hidden { display: none; }
+
+  #controls-row { display: flex; align-items: center; gap: 12px; }
+
+  button { font-family: inherit; cursor: pointer; border: none; border-radius: 999px;
+    font-size: 13px; font-weight: 600; padding: 12px 20px; transition: transform .12s ease, background .12s ease; }
+  button:active { transform: scale(0.96); }
+
+  #mic-btn { width: 64px; height: 64px; border-radius: 50%; background: #2563eb; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 22px; padding: 0; }
+  #mic-btn.recording { background: #e0433c; box-shadow: 0 0 0 6px rgba(224,67,60,0.25); }
+  #mic-btn.busy { background: #4a5262; }
+  #mic-btn[disabled] { opacity: .4; cursor: not-allowed; }
+
+  #vr-btn-slot { display: flex; }
+  #vr-btn-slot button, #VRButton { background: #16a34a !important; color: #fff !important;
+    position: static !important; border-radius: 999px !important; }
+
+  #end-btn { background: rgba(255,255,255,0.08); color: #eef1f6; border: 1px solid rgba(255,255,255,0.14); }
+  #end-btn:hover { background: rgba(255,255,255,0.14); }
+
+  #type-fallback { display: flex; gap: 8px; width: 100%; max-width: 620px; }
+  #type-fallback input { flex: 1; padding: 10px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
+    background: #0d1017; color: #eef1f6; font-size: 13px; }
+  #type-fallback button { background: #2563eb; color: #fff; padding: 10px 16px; }
+
+  #feedback-panel { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(4,5,8,0.72); backdrop-filter: blur(6px); z-index: 20; }
+  #feedback-panel.visible { display: flex; }
+  #feedback-card { max-width: 520px; width: calc(100% - 40px); }
+  #feedback-card h2 { margin: 0 0 4px; font-size: 17px; }
+  #feedback-card .sub { color: #8b93a1; font-size: 12px; margin-bottom: 14px; }
+  #feedback-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .metric { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 10px 12px; }
+  .metric .label { font-size: 10px; color: #8b93a1; text-transform: uppercase; letter-spacing: .06em; }
+  .metric .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+  #avatar-feedback-text { font-size: 13.5px; line-height: 1.55; background: rgba(255,255,255,0.04);
+    border-radius: 10px; padding: 12px; white-space: pre-wrap; min-height: 40px; }
+  #feedback-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+  #feedback-close { background: #2563eb; color: #fff; }
+
+  #status-chip { position: fixed; top: 16px; right: 16px; font-size: 10.5px; color: #8b93a1;
+    background: rgba(16,19,26,0.7); padding: 5px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08); }
+
+  .link { color: #7fb2ff; }
+</style>
+</head>
+<body>
+
+<canvas id="scene-canvas"></canvas>
+<div id="status-chip">Inicializando escena…</div>
+
+<div id="overlay">
+  <div id="setup-panel" class="panel">
+    <h1>Configuración — Avatar Convai</h1>
+    <label for="api-key-input">Convai API Key (se guarda solo en este navegador)</label>
+    <input id="api-key-input" type="password" placeholder="Pega aquí tu API key de Convai" autocomplete="off" />
+    <label for="char-id-input">Character ID</label>
+    <input id="char-id-input" type="text" value="c2e8f824-6e58-11f1-9a04-42010a7be02e" />
+    <div class="hint">
+      La API key nunca se incrusta en el código ni se envía a nadie salvo a api.convai.com.
+      Se guarda en <em>localStorage</em> de tu navegador para no tener que pegarla cada vez.
+      Consigue una en <span class="link">convai.com</span>.
+    </div>
+    <div id="setup-status"></div>
+
+    <label for="avatar-url-input">Avatar (GLB) — opcional</label>
+    <input id="avatar-url-input" type="text" placeholder="https://models.readyplayer.me/xxxx.glb?morphTargets=ARKit,Oculus%20Visemes" />
+    <div class="hint">
+      Pega aquí el enlace .glb de tu avatar (por ejemplo el mismo que configuraste en la pestaña
+      "Avatar" de tu personaje en Convai, o crea uno gratis en <span class="link">readyplayer.me</span>
+      y copia su URL). Si lo dejas vacío, se usa un muñeco simple de reemplazo.
+    </div>
+    <div id="avatar-status" style="font-size:11px;margin-top:4px;color:#7fd88f;min-height:14px;"></div>
+  </div>
+
+  <div id="hud-bottom">
+    <div id="subtitle-panel" class="panel hidden">
+      <span class="who" id="subtitle-who">Avatar</span>
+      <span id="subtitle-text"></span>
+    </div>
+
+    <div id="type-fallback" style="display:none;">
+      <input id="type-input" type="text" placeholder="Escribe tu mensaje (alternativa a voz)…" />
+      <button id="type-send">Enviar</button>
+    </div>
+
+    <div id="controls-row">
+      <button id="mic-btn" title="Mantén pulsado para hablar">🎙️</button>
+      <div id="vr-btn-slot"></div>
+      <button id="end-btn">Finalizar y ver feedback</button>
+    </div>
+  </div>
+</div>
+
+<div id="feedback-panel">
+  <div id="feedback-card" class="panel">
+    <h2>Resumen de la interacción</h2>
+    <div class="sub" id="feedback-timerange">—</div>
+    <div id="feedback-metrics">
+      <div class="metric"><div class="label">Duración</div><div class="value" id="metric-duration">00:00</div></div>
+      <div class="metric"><div class="label">Turnos de conversación</div><div class="value" id="metric-turns">0</div></div>
+    </div>
+    <div class="label" style="margin-bottom:6px;color:#8b93a1;font-size:10px;text-transform:uppercase;letter-spacing:.06em;">Comentario del avatar</div>
+    <div id="avatar-feedback-text">Generando feedback…</div>
+    <div id="feedback-actions">
+      <button id="feedback-close">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+/* ---------------------------------------------------------------------
+   Estado / configuración
+--------------------------------------------------------------------- */
+const state = {
+  apiKey: localStorage.getItem("convai_api_key") || "",
+  charId: localStorage.getItem("convai_char_id") || "c2e8f824-6e58-11f1-9a04-42010a7be02e",
+  avatarUrl: localStorage.getItem("convai_avatar_url") || "",
+  sessionId: "-1",
+  turns: 0,
+  sessionStart: null,
+  isRecording: false,
+  isBusy: false,
+  recognizer: null,
+};
+
+const el = (id) => document.getElementById(id);
+const apiKeyInput = el("api-key-input");
+const charIdInput = el("char-id-input");
+const avatarUrlInput = el("avatar-url-input");
+const avatarStatus = el("avatar-status");
+const setupStatus = el("setup-status");
+const statusChip = el("status-chip");
+const micBtn = el("mic-btn");
+const endBtn = el("end-btn");
+const subtitlePanel = el("subtitle-panel");
+const subtitleWho = el("subtitle-who");
+const subtitleText = el("subtitle-text");
+const typeFallback = el("type-fallback");
+const typeInput = el("type-input");
+const typeSend = el("type-send");
+
+apiKeyInput.value = state.apiKey;
+charIdInput.value = state.charId;
+avatarUrlInput.value = state.avatarUrl;
+
+apiKeyInput.addEventListener("change", () => {
+  state.apiKey = apiKeyInput.value.trim();
+  localStorage.setItem("convai_api_key", state.apiKey);
+  setupStatus.textContent = state.apiKey ? "API key guardada en este navegador." : "";
+});
+charIdInput.addEventListener("change", () => {
+  state.charId = charIdInput.value.trim();
+  localStorage.setItem("convai_char_id", state.charId);
+});
+avatarUrlInput.addEventListener("change", () => {
+  state.avatarUrl = avatarUrlInput.value.trim();
+  localStorage.setItem("convai_avatar_url", state.avatarUrl);
+  loadAvatarGLB(state.avatarUrl);
+});
+
+/* ---------------------------------------------------------------------
+   Escena Three.js / WebXR
+--------------------------------------------------------------------- */
+const canvas = el("scene-canvas");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.setClearColor(0x0a0c10);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+
+// Entorno PBR (reflejos suaves realistas en piel/ropa) en vez de luz plana
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.02).texture;
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
+camera.position.set(0, 1.6, 2.5);
+
+// Luces (habitación bien iluminada, luz cálida de techo + luz de ventana)
+scene.add(new THREE.HemisphereLight(0xf3f6fa, 0xe9e4d8, 0.8));
+const key = new THREE.DirectionalLight(0xfff3e0, 1.35);
+key.position.set(1.2, 2.4, -1.2);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.camera.near = 0.5;
+key.shadow.camera.far = 8;
+key.shadow.camera.left = -3;
+key.shadow.camera.right = 3;
+key.shadow.camera.top = 3;
+key.shadow.camera.bottom = -3;
+key.shadow.bias = -0.0025;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xcfe0f2, 0.4);
+fill.position.set(-2, 2, 1.5);
+scene.add(fill);
+const ceilingLamp = new THREE.PointLight(0xfff6e6, 0.6, 6);
+ceilingLamp.position.set(0.3, 2.4, -0.4);
+scene.add(ceilingLamp);
+
+/* ---------------------------------------------------------------------
+   Habitación de hospital: paredes, ventana, puerta y mobiliario
+--------------------------------------------------------------------- */
+const ROOM = { halfW: 2.6, backZ: -2.3, frontZ: 2.7, height: 2.6 };
+const roomWidth = ROOM.halfW * 2;
+const roomDepth = ROOM.frontZ - ROOM.backZ;
+const roomCenterZ = (ROOM.frontZ + ROOM.backZ) / 2;
+
+const room = new THREE.Group();
+
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xdce3dc, roughness: 0.95, envMapIntensity: 0.15 });
+const floorMat = new THREE.MeshStandardMaterial({ color: 0xb7c1c4, roughness: 0.85, envMapIntensity: 0.15 });
+const ceilingMat = new THREE.MeshStandardMaterial({
+  color: 0xf3f3ef, roughness: 1, envMapIntensity: 0.1,
+  emissive: 0xeceae0, emissiveIntensity: 0.4,
+});
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomDepth), floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.set(0, 0, roomCenterZ);
+floor.receiveShadow = true;
+room.add(floor);
+
+const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomDepth), ceilingMat);
+ceiling.rotation.x = Math.PI / 2;
+ceiling.position.set(0, ROOM.height, roomCenterZ);
+room.add(ceiling);
+
+// Panel de luz de techo (detalle visual del punto de luz)
+const lampPanel = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.7, 0.35),
+  new THREE.MeshBasicMaterial({ color: 0xfff8ea })
+);
+lampPanel.rotation.x = Math.PI / 2;
+lampPanel.position.set(0.3, ROOM.height - 0.01, -0.4);
+room.add(lampPanel);
+
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, ROOM.height), wallMat);
+backWall.position.set(0, ROOM.height / 2, ROOM.backZ);
+backWall.receiveShadow = true;
+room.add(backWall);
+
+const frontWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, ROOM.height), wallMat);
+frontWall.position.set(0, ROOM.height / 2, ROOM.frontZ);
+frontWall.rotation.y = Math.PI;
+room.add(frontWall);
+
+const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(roomDepth, ROOM.height), wallMat);
+leftWall.rotation.y = Math.PI / 2;
+leftWall.position.set(-ROOM.halfW, ROOM.height / 2, roomCenterZ);
+leftWall.receiveShadow = true;
+room.add(leftWall);
+
+const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(roomDepth, ROOM.height), wallMat);
+rightWall.rotation.y = -Math.PI / 2;
+rightWall.position.set(ROOM.halfW, ROOM.height / 2, roomCenterZ);
+rightWall.receiveShadow = true;
+room.add(rightWall);
+
+// --- Ventana (en la pared del fondo) ---
+function makeWindow(width, height) {
+  const g = new THREE.Group();
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xf6f6f2, roughness: 0.6 });
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(width + 0.14, height + 0.14, 0.06), frameMat);
+  g.add(frame);
+
+  const skyCanvas = document.createElement("canvas");
+  skyCanvas.width = 256; skyCanvas.height = 256;
+  const sctx = skyCanvas.getContext("2d");
+  const grad = sctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#6fb8ea");
+  grad.addColorStop(1, "#bfe0f7");
+  sctx.fillStyle = grad;
+  sctx.fillRect(0, 0, 256, 256);
+  const skyTex = new THREE.CanvasTexture(skyCanvas);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: skyTex }));
+  glass.position.z = 0.032;
+  g.add(glass);
+
+  const mullionMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+  const vBar = new THREE.Mesh(new THREE.BoxGeometry(0.028, height, 0.02), mullionMat);
+  vBar.position.z = 0.045;
+  g.add(vBar);
+  const hBar = new THREE.Mesh(new THREE.BoxGeometry(width, 0.028, 0.02), mullionMat);
+  hBar.position.z = 0.045;
+  g.add(hBar);
+
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(width + 0.2, 0.04, 0.12), frameMat);
+  sill.position.set(0, -height / 2 - 0.06, 0.03);
+  g.add(sill);
+
+  return g;
+}
+const windowGroup = makeWindow(1.15, 1.25);
+windowGroup.position.set(1.15, 1.55, ROOM.backZ + 0.03);
+room.add(windowGroup);
+
+// --- Puerta (en la pared izquierda) ---
+function makeDoor(width, height) {
+  const g = new THREE.Group();
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xf6f6f2, roughness: 0.6 });
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0xe3e9e3, roughness: 0.5 });
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(width + 0.12, height + 0.08, 0.05), frameMat);
+  g.add(frame);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.04), doorMat);
+  panel.position.z = 0.03;
+  g.add(panel);
+  const handleMat = new THREE.MeshStandardMaterial({ color: 0xb7bcc2, metalness: 0.6, roughness: 0.3 });
+  const handle = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 12), handleMat);
+  handle.position.set(width * 0.32, 0, 0.07);
+  g.add(handle);
+  return g;
+}
+const doorGroup = makeDoor(0.85, 2.0);
+doorGroup.position.set(-ROOM.halfW + 0.03, 1.02, 1.55);
+doorGroup.rotation.y = Math.PI / 2;
+room.add(doorGroup);
+
+// --- Cama de hospital ---
+function makeHospitalBed() {
+  const g = new THREE.Group();
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xcdd3d6, metalness: 0.35, roughness: 0.45 });
+  const mattressMat = new THREE.MeshStandardMaterial({ color: 0xf4f5f1, roughness: 0.85 });
+  const blanketMat = new THREE.MeshStandardMaterial({ color: 0x9dc3de, roughness: 0.85 });
+  const pillowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 });
+  const railMat = new THREE.MeshStandardMaterial({ color: 0xe8eaec, metalness: 0.3, roughness: 0.4 });
+
+  const bedW = 0.9, bedL = 2.0, bedH = 0.55;
+
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, bedH, 10), frameMat);
+      leg.position.set(sx * (bedW / 2 - 0.05), bedH / 2, sz * (bedL / 2 - 0.1));
+      g.add(leg);
+    }
+  }
+  const base = new THREE.Mesh(new THREE.BoxGeometry(bedW, 0.06, bedL), frameMat);
+  base.position.y = bedH;
+  g.add(base);
+
+  const mattress = new THREE.Mesh(new THREE.BoxGeometry(bedW - 0.05, 0.14, bedL - 0.05), mattressMat);
+  mattress.position.y = bedH + 0.1;
+  g.add(mattress);
+
+  const blanket = new THREE.Mesh(new THREE.BoxGeometry(bedW - 0.02, 0.05, bedL * 0.62), blanketMat);
+  blanket.position.set(0, bedH + 0.19, bedL * 0.1);
+  g.add(blanket);
+
+  const pillow = new THREE.Mesh(new THREE.BoxGeometry(bedW - 0.2, 0.09, 0.32), pillowMat);
+  pillow.position.set(0, bedH + 0.21, -bedL / 2 + 0.25);
+  g.add(pillow);
+
+  const headboard = new THREE.Mesh(new THREE.BoxGeometry(bedW, 0.65, 0.05), frameMat);
+  headboard.position.set(0, bedH + 0.35, -bedL / 2 - 0.02);
+  g.add(headboard);
+
+  const footboard = new THREE.Mesh(new THREE.BoxGeometry(bedW, 0.35, 0.05), frameMat);
+  footboard.position.set(0, bedH + 0.2, bedL / 2 + 0.02);
+  g.add(footboard);
+
+  for (const sx of [-1, 1]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.18, bedL * 0.5), railMat);
+    rail.position.set(sx * (bedW / 2), bedH + 0.32, -bedL * 0.12);
+    g.add(rail);
+  }
+
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+const bed = makeHospitalBed();
+bed.position.set(-1.85, 0, -1.2);
+room.add(bed);
+
+// --- Mesa de noche ---
+function makeNightstand() {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe9ebe6, roughness: 0.5 });
+  const topMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+  const drawerMat = new THREE.MeshStandardMaterial({ color: 0xd6dad5, roughness: 0.5 });
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6 });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.55, 0.4), bodyMat);
+  body.position.y = 0.275;
+  g.add(body);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.03, 0.44), topMat);
+  top.position.y = 0.565;
+  g.add(top);
+  const drawer = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.14, 0.02), drawerMat);
+  drawer.position.set(0, 0.42, 0.2);
+  g.add(drawer);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const wheel = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), wheelMat);
+      wheel.position.set(sx * 0.17, 0.02, sz * 0.17);
+      g.add(wheel);
+    }
+  }
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+const nightstand = makeNightstand();
+nightstand.position.set(-0.65, 0, -2.05);
+nightstand.scale.setScalar(1.2);
+room.add(nightstand);
+
+// --- Sillón ---
+function makeArmchair() {
+  const g = new THREE.Group();
+  const fabricMat = new THREE.MeshStandardMaterial({ color: 0x7d9184, roughness: 0.85 });
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 0.6 });
+
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.14, 0.56), fabricMat);
+  seat.position.y = 0.42;
+  g.add(seat);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.12), fabricMat);
+  back.position.set(0, 0.72, -0.22);
+  g.add(back);
+  for (const sx of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.28, 0.5), fabricMat);
+    arm.position.set(sx * 0.28, 0.54, 0.02);
+    g.add(arm);
+  }
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.34, 8), legMat);
+    leg.position.set(sx * 0.24, 0.17, sz * 0.22);
+    g.add(leg);
+  }
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+const armchair = makeArmchair();
+armchair.position.set(2.15, 0, 0.2);
+armchair.rotation.y = -Math.PI / 2;
+room.add(armchair);
+
+// Indicador sutil de presencia IA bajo el avatar
+const ringGeo = new THREE.RingGeometry(0.55, 0.6, 48);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x3fa9ff, side: THREE.DoubleSide, transparent: true, opacity: 0.35 });
+const ring = new THREE.Mesh(ringGeo, ringMat);
+ring.rotation.x = -Math.PI / 2;
+ring.position.set(0, 0.005, -1.1);
+room.add(ring);
+
+scene.add(room);
+
+/* ---- Avatar: muñeco de reemplazo (primitivas) + carga opcional de GLB real ---- */
+const avatar = new THREE.Group();
+avatar.position.set(0, 0, -1.1);
+scene.add(avatar);
+
+const placeholderRig = new THREE.Group();
+avatar.add(placeholderRig);
+
+const skin = new THREE.MeshPhysicalMaterial({ color: 0xe0a67c, roughness: 0.55, clearcoat: 0.15, clearcoatRoughness: 0.6 });
+const suit = new THREE.MeshPhysicalMaterial({ color: 0x2b3646, roughness: 0.45, clearcoat: 0.25, clearcoatRoughness: 0.35 });
+const shoeMat = new THREE.MeshStandardMaterial({ color: 0x181c22, roughness: 0.4 });
+const hairMat = new THREE.MeshStandardMaterial({ color: 0x2a1c14, roughness: 0.55 });
+const accent = new THREE.MeshStandardMaterial({ color: 0x3fa9ff, emissive: 0x1b5faa, emissiveIntensity: 0.5, roughness: 0.4 });
+
+// --- Piernas + zapatos ---
+for (const side of [-1, 1]) {
+  const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.5, 4, 12), suit);
+  leg.position.set(side * 0.115, 0.4, 0);
+  placeholderRig.add(leg);
+  const shoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.09, 4, 8), shoeMat);
+  shoe.rotation.z = Math.PI / 2;
+  shoe.position.set(side * 0.115, 0.06, 0.03);
+  placeholderRig.add(shoe);
+}
+
+// --- Torso (silueta con hombros, entallado en la cintura vía Lathe) ---
+const torsoProfile = [
+  new THREE.Vector2(0.15, 0.0),
+  new THREE.Vector2(0.155, 0.14),
+  new THREE.Vector2(0.185, 0.3),
+  new THREE.Vector2(0.225, 0.44),
+  new THREE.Vector2(0.14, 0.5),
+  new THREE.Vector2(0.085, 0.54),
+];
+const torso = new THREE.Mesh(new THREE.LatheGeometry(torsoProfile, 24), suit);
+torso.position.y = 0.76;
+placeholderRig.add(torso);
+
+// Cinturón acento (coincide con el tema visual azul del espacio)
+const belt = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.012, 8, 24), accent);
+belt.rotation.x = Math.PI / 2;
+belt.position.y = 0.78;
+placeholderRig.add(belt);
+
+// --- Brazos + manos ---
+for (const side of [-1, 1]) {
+  const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.4, 4, 10), suit);
+  arm.position.set(side * 0.29, 0.98, 0);
+  arm.rotation.z = side * 0.16;
+  placeholderRig.add(arm);
+  const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05, 14, 14), skin);
+  hand.position.set(side * 0.35, 0.76, 0);
+  placeholderRig.add(hand);
+}
+
+// --- Cuello ---
+const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.09, 16), skin);
+neck.position.y = 1.35;
+placeholderRig.add(neck);
+
+const collar = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.012, 8, 24), accent);
+collar.rotation.x = Math.PI / 2;
+collar.position.y = 1.3;
+placeholderRig.add(collar);
+
+// --- Cabeza (grupo pivote para el idle bob) ---
+const headGroup = new THREE.Group();
+headGroup.position.y = 1.48;
+placeholderRig.add(headGroup);
+
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.135, 32, 32), skin);
+head.scale.set(0.92, 1.08, 0.98);
+headGroup.add(head);
+
+const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.1, 24, 24), skin);
+jaw.scale.set(0.85, 0.62, 0.82);
+jaw.position.set(0, -0.095, 0.01);
+headGroup.add(jaw);
+
+// Pelo (casquete)
+const hair = new THREE.Mesh(
+  new THREE.SphereGeometry(0.142, 24, 24, 0, Math.PI * 2, 0, Math.PI * 0.52),
+  hairMat
+);
+hair.position.y = 0.02;
+headGroup.add(hair);
+const fringe = new THREE.Mesh(new THREE.SphereGeometry(0.138, 20, 12, 0, Math.PI * 2, Math.PI * 0.28, Math.PI * 0.18), hairMat);
+fringe.position.y = 0.02;
+headGroup.add(fringe);
+
+// Orejas
+for (const side of [-1, 1]) {
+  const ear = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 12), skin);
+  ear.scale.set(0.6, 1, 0.5);
+  ear.position.set(side * 0.132, -0.01, 0.005);
+  headGroup.add(ear);
+}
+
+// Nariz
+const nose = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.045, 12), skin);
+nose.rotation.x = Math.PI / 2;
+nose.position.set(0, -0.015, 0.128);
+headGroup.add(nose);
+
+// Cejas
+const browMat = new THREE.MeshStandardMaterial({ color: 0x2a1c14, roughness: 0.6 });
+for (const side of [-1, 1]) {
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.009, 0.01), browMat);
+  brow.position.set(side * 0.05, 0.045, 0.122);
+  brow.rotation.z = side * -0.12;
+  headGroup.add(brow);
+}
+
+// Ojos (esclerótica + iris)
+const scleraMat = new THREE.MeshStandardMaterial({ color: 0xf5f2ea, roughness: 0.3 });
+const irisMat = new THREE.MeshStandardMaterial({ color: 0x3c2a1e, roughness: 0.25 });
+for (const side of [-1, 1]) {
+  const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.02, 14, 14), scleraMat);
+  sclera.position.set(side * 0.05, 0.02, 0.122);
+  headGroup.add(sclera);
+  const iris = new THREE.Mesh(new THREE.SphereGeometry(0.011, 12, 12), irisMat);
+  iris.position.set(side * 0.05, 0.02, 0.135);
+  headGroup.add(iris);
+}
+
+// Labios (usados como driver del lip-sync por amplitud de audio)
+const mouth = new THREE.Mesh(new THREE.CapsuleGeometry(0.011, 0.05, 4, 10), new THREE.MeshStandardMaterial({ color: 0xac6b5e, roughness: 0.5 }));
+mouth.rotation.z = Math.PI / 2;
+mouth.position.set(0, -0.06, 0.125);
+headGroup.add(mouth);
+
+placeholderRig.traverse((obj) => {
+  if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = false; }
+});
+
+// Base / plataforma con brillo (indica "IA activa") — se muestra con cualquier avatar
+const base = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.42, 0.04, 32), accent);
+base.position.y = 0.02;
+base.receiveShadow = true;
+avatar.add(base);
+
+/* ---- Carga opcional de un avatar GLB real (ReadyPlayerMe / el que uses en Convai) ---- */
+const gltfLoader = new GLTFLoader();
+let glbRig = null;
+let glbBaseY = 0;
+let glbMouthTargets = [];
+let usingGLB = false;
+const MOUTH_MORPH_CANDIDATES = ["mouthOpen", "viseme_aa", "jawOpen", "mouth_open", "MouthOpen", "viseme_PP"];
+
+function setAvatarStatus(text, isError) {
+  avatarStatus.textContent = text;
+  avatarStatus.style.color = isError ? "#f0876b" : "#7fd88f";
+}
+
+function loadAvatarGLB(url) {
+  if (!url) {
+    if (glbRig) { avatar.remove(glbRig); glbRig = null; }
+    usingGLB = false;
+    placeholderRig.visible = true;
+    subPlane.position.set(0, 2.05, -1.1);
+    setAvatarStatus("");
+    return;
+  }
+  setAvatarStatus("Cargando avatar…");
+  gltfLoader.load(
+    url,
+    (gltf) => {
+      if (glbRig) { avatar.remove(glbRig); glbRig = null; }
+      const root = gltf.scene;
+
+      const box = new THREE.Box3().setFromObject(root);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const targetHeight = 1.75;
+      const scale = size.y > 0.01 ? targetHeight / size.y : 1;
+      root.scale.setScalar(scale);
+
+      const box2 = new THREE.Box3().setFromObject(root);
+      root.position.y -= box2.min.y;
+
+      glbMouthTargets = [];
+      root.traverse((obj) => {
+        if (obj.isMesh && obj.morphTargetDictionary) {
+          for (const name of MOUTH_MORPH_CANDIDATES) {
+            if (name in obj.morphTargetDictionary) {
+              glbMouthTargets.push({ mesh: obj, index: obj.morphTargetDictionary[name] });
+            }
+          }
+        }
+        if (obj.isMesh) { obj.castShadow = false; obj.receiveShadow = false; }
+      });
+
+      avatar.add(root);
+      glbRig = root;
+      glbBaseY = root.position.y;
+      placeholderRig.visible = false;
+      usingGLB = true;
+
+      const box3 = new THREE.Box3().setFromObject(root);
+      subPlane.position.set(0, box3.max.y + 0.35, -1.1);
+
+      setAvatarStatus(
+        glbMouthTargets.length ? "Avatar cargado (con lip-sync)." : "Avatar cargado (sin morph targets de boca — sin lip-sync)."
+      );
+    },
+    undefined,
+    (err) => {
+      console.warn("No se pudo cargar el avatar GLB:", err);
+      setAvatarStatus("No se pudo cargar ese GLB. Usando el muñeco por defecto.", true);
+      usingGLB = false;
+      placeholderRig.visible = true;
+    }
+  );
+}
+
+if (state.avatarUrl) loadAvatarGLB(state.avatarUrl);
+
+/* ---- Subtítulo flotante en el mundo 3D (visible dentro del casco) ---- */
+const subCanvas = document.createElement("canvas");
+subCanvas.width = 1024; subCanvas.height = 256;
+const subCtx = subCanvas.getContext("2d");
+const subTexture = new THREE.CanvasTexture(subCanvas);
+const subMat = new THREE.MeshBasicMaterial({ map: subTexture, transparent: true });
+const subPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.35), subMat);
+subPlane.position.set(0, 2.05, -1.1);
+subPlane.visible = false;
+scene.add(subPlane);
+
+function drawWorldSubtitle(who, text) {
+  subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
+  subCtx.fillStyle = "rgba(10,12,16,0.72)";
+  roundRect(subCtx, 8, 8, subCanvas.width - 16, subCanvas.height - 16, 24);
+  subCtx.fill();
+  subCtx.fillStyle = "#7fb2ff";
+  subCtx.font = "600 30px sans-serif";
+  subCtx.fillText(who.toUpperCase(), 34, 54);
+  subCtx.fillStyle = "#eef1f6";
+  subCtx.font = "28px sans-serif";
+  wrapText(subCtx, text, 34, 100, subCanvas.width - 68, 36);
+  subTexture.needsUpdate = true;
+  subPlane.visible = true;
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(" ");
+  let line = "", lines = [];
+  for (const w of words) {
+    const test = line + w + " ";
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w + " "; }
+    else line = test;
+  }
+  lines.push(line);
+  lines.slice(0, 4).forEach((l, i) => ctx.fillText(l.trim(), x, y + i * lineHeight));
+}
+
+renderer.setAnimationLoop(render);
+
+let mouthAmplitude = 0;
+let idleT = 0;
+
+function render(time, frame) {
+  idleT += 0.016;
+  avatar.rotation.y = Math.sin(idleT * 0.25) * 0.08;
+  ring.material.opacity = 0.35 + Math.sin(idleT * 2) * 0.15;
+
+  if (usingGLB && glbRig) {
+    glbRig.position.y = glbBaseY + Math.sin(idleT * 1.3) * 0.006;
+    const influence = Math.min(mouthAmplitude * 12, 1);
+    for (const t of glbMouthTargets) {
+      t.mesh.morphTargetInfluences[t.index] = influence;
+    }
+  } else {
+    headGroup.position.y = 1.48 + Math.sin(idleT * 1.3) * 0.006;
+    mouth.scale.x = 1 + mouthAmplitude * 10;
+  }
+
+  subPlane.lookAt(camera.position.x, subPlane.position.y, camera.position.z);
+  renderer.render(scene, camera);
+}
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---- Botón VR con DOM overlay para poder usar la UI dentro del casco ---- */
+if ("xr" in navigator) {
+  const vrButton = VRButton.createButton(renderer, {
+    optionalFeatures: ["dom-overlay"],
+    domOverlay: { root: document.getElementById("overlay") },
+  });
+  el("vr-btn-slot").appendChild(vrButton);
+  statusChip.textContent = "Escena lista. Pulsa \"ENTER VR\" en tu Quest.";
+} else {
+  statusChip.textContent = "WebXR no disponible en este navegador (prueba en el navegador de Meta Quest).";
+}
+
+/* ---- Controlador VR: gatillo = mantener pulsado para hablar ---- */
+function setupControllers() {
+  for (let i = 0; i < 2; i++) {
+    const controller = renderer.xr.getController(i);
+    controller.addEventListener("selectstart", () => startRecording());
+    controller.addEventListener("selectend", () => stopRecording());
+    scene.add(controller);
+  }
+}
+setupControllers();
+
+/* ---------------------------------------------------------------------
+   Reconocimiento de voz (Web Speech API) + fallback de texto
+--------------------------------------------------------------------- */
+const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function startRecording() {
+  if (state.isBusy || state.isRecording) return;
+  if (!validateConfig()) return;
+  if (!SpeechRecognitionImpl) {
+    typeFallback.style.display = "flex";
+    setStatus("Reconocimiento de voz no disponible aquí. Usa el campo de texto.");
+    return;
+  }
+  const rec = new SpeechRecognitionImpl();
+  rec.lang = "es-ES";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.onstart = () => {
+    state.isRecording = true;
+    micBtn.classList.add("recording");
+    setStatus("Escuchando…");
+  };
+  rec.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    sendUserMessage(text);
+  };
+  rec.onerror = (e) => {
+    setStatus("Error de reconocimiento de voz: " + e.error + ". Prueba el campo de texto.");
+    typeFallback.style.display = "flex";
+  };
+  rec.onend = () => {
+    state.isRecording = false;
+    micBtn.classList.remove("recording");
+  };
+  state.recognizer = rec;
+  rec.start();
+}
+function stopRecording() {
+  if (state.recognizer && state.isRecording) {
+    state.recognizer.stop();
+  }
+}
+
+micBtn.addEventListener("mousedown", startRecording);
+micBtn.addEventListener("touchstart", (e) => { e.preventDefault(); startRecording(); });
+micBtn.addEventListener("mouseup", stopRecording);
+micBtn.addEventListener("touchend", (e) => { e.preventDefault(); stopRecording(); });
+micBtn.addEventListener("mouseleave", stopRecording);
+
+typeSend.addEventListener("click", () => {
+  const text = typeInput.value.trim();
+  if (text) { sendUserMessage(text); typeInput.value = ""; }
+});
+typeInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") typeSend.click();
+});
+
+/* ---------------------------------------------------------------------
+   Llamada a la API de Convai
+--------------------------------------------------------------------- */
+function validateConfig() {
+  if (!state.apiKey) {
+    setupStatus.textContent = "Falta la API key de Convai.";
+    setupStatus.style.color = "#f0876b";
+    setStatus("Introduce tu API key de Convai arriba antes de hablar.");
+    return false;
+  }
+  if (!state.charId) {
+    setupStatus.textContent = "Falta el Character ID.";
+    setupStatus.style.color = "#f0876b";
+    return false;
+  }
+  return true;
+}
+
+function setStatus(text) { statusChip.textContent = text; }
+
+function showSubtitle(who, text) {
+  subtitleWho.textContent = who;
+  subtitleText.textContent = text;
+  subtitlePanel.classList.remove("hidden");
+  drawWorldSubtitle(who, text);
+}
+
+const transcriptLog = [];
+
+async function sendUserMessage(text, { silent = false } = {}) {
+  if (!validateConfig()) return null;
+  state.isBusy = true;
+  micBtn.classList.add("busy");
+  micBtn.disabled = true;
+  if (!silent) {
+    showSubtitle("Tú", text);
+    transcriptLog.push({ role: "user", text });
+    state.turns++;
+  }
+  setStatus("Consultando al avatar…");
+
+  try {
+    const form = new FormData();
+    form.append("userText", text);
+    form.append("charID", state.charId);
+    form.append("sessionID", state.sessionId);
+    form.append("voiceResponse", "True");
+
+    const res = await fetch("https://api.convai.com/character/getResponse", {
+      method: "POST",
+      headers: { "CONVAI-API-KEY": state.apiKey },
+      body: form,
+    });
+
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+
+    if (data.sessionID) state.sessionId = data.sessionID;
+    const replyText = data.text || "(sin respuesta de texto)";
+    showSubtitle("Avatar", replyText);
+    transcriptLog.push({ role: "avatar", text: replyText });
+
+    if (data.audio) {
+      await playBase64Audio(data.audio, data.sample_rate);
+    }
+    setStatus("Listo. Mantén pulsado el micro para hablar.");
+    return replyText;
+  } catch (err) {
+    console.error(err);
+    setStatus("Error al contactar con Convai: " + err.message);
+    return null;
+  } finally {
+    state.isBusy = false;
+    micBtn.classList.remove("busy");
+    micBtn.disabled = false;
+  }
+}
+
+/* ---- Reproducción de audio + lip-sync básico con AnalyserNode ---- */
+let audioCtx = null;
+function playBase64Audio(base64, sampleRateHint) {
+  return new Promise((resolve) => {
+    try {
+      const byteChars = atob(base64);
+      const bytes = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const audioEl = new Audio(url);
+
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaElementSource(audioEl);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+
+      let raf;
+      function tick() {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        mouthAmplitude = Math.min(avg / 180, 1) * 0.03;
+        raf = requestAnimationFrame(tick);
+      }
+      audioEl.onplay = () => { audioCtx.resume(); tick(); };
+      audioEl.onended = () => { cancelAnimationFrame(raf); mouthAmplitude = 0; URL.revokeObjectURL(url); resolve(); };
+      audioEl.onerror = () => { cancelAnimationFrame(raf); mouthAmplitude = 0; resolve(); };
+      audioEl.play().catch(() => resolve());
+    } catch (e) {
+      console.warn("No se pudo reproducir el audio:", e);
+      resolve();
+    }
+  });
+}
+
+/* ---------------------------------------------------------------------
+   Sesión / Feedback final
+--------------------------------------------------------------------- */
+state.sessionStart = Date.now();
+
+endBtn.addEventListener("click", async () => {
+  if (!validateConfig()) return;
+  const feedbackPanel = el("feedback-panel");
+  const avatarFeedbackText = el("avatar-feedback-text");
+  const durationEl = el("metric-duration");
+  const turnsEl = el("metric-turns");
+  const rangeEl = el("feedback-timerange");
+
+  const elapsedMs = Date.now() - state.sessionStart;
+  const mm = String(Math.floor(elapsedMs / 60000)).padStart(2, "0");
+  const ss = String(Math.floor((elapsedMs % 60000) / 1000)).padStart(2, "0");
+  durationEl.textContent = `${mm}:${ss}`;
+  turnsEl.textContent = String(state.turns);
+  rangeEl.textContent = `${new Date(state.sessionStart).toLocaleTimeString()} – ${new Date().toLocaleTimeString()}`;
+  avatarFeedbackText.textContent = "Generando feedback…";
+  feedbackPanel.classList.add("visible");
+
+  const feedbackPrompt = state.turns > 0
+    ? "La interacción ha terminado. Por favor, dame un feedback breve (máx. 4 frases) sobre cómo ha ido nuestra conversación, qué destacarías de mi forma de comunicarme y una sugerencia de mejora."
+    : "No hemos llegado a conversar. Dime en una frase que no hay suficiente interacción para dar feedback.";
+
+  const reply = await sendUserMessage(feedbackPrompt, { silent: true });
+  avatarFeedbackText.textContent = reply || "No se pudo obtener el feedback del avatar (revisa la API key y la conexión).";
+});
+
+el("feedback-close").addEventListener("click", () => {
+  el("feedback-panel").classList.remove("visible");
+});
+
+/* ---- PWA: registro del service worker (permite "Añadir a inicio" en Quest) ---- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((err) => {
+      console.warn("No se pudo registrar el service worker:", err);
+    });
+  });
+}
+</script>
+</body>
+</html>
