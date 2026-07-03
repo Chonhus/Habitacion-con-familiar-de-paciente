@@ -122,7 +122,7 @@
     </div>
 
     <div id="controls-row">
-      <button id="mic-btn" title="Mantén pulsado para hablar">🎙️</button>
+      <button id="mic-btn" title="Toca para hablar (se detiene sola al terminar)">🎙️</button>
       <div id="vr-btn-slot"></div>
       <button id="end-btn">Finalizar y ver feedback</button>
     </div>
@@ -257,7 +257,7 @@ function drawHud(statusText) {
   wrapText(hudCtx, statusText, 30, 60, hudCanvas.width - 60, 42);
   hudCtx.fillStyle = "#7fb2ff";
   hudCtx.font = "26px sans-serif";
-  hudCtx.fillText("Mantén pulsado el gatillo del mando para hablar", 30, hudCanvas.height - 34);
+  hudCtx.fillText("Toca el gatillo para hablar (se detiene solo al terminar)", 30, hudCanvas.height - 34);
   hudTexture.needsUpdate = true;
 }
 drawHud("Cargando...");
@@ -835,7 +835,7 @@ if ("xr" in navigator) {
   setStatus("WebXR no disponible en este navegador (prueba en el navegador de Meta Quest).");
 }
 
-/* ---- Controladores VR: modelos visibles + gatillo para hablar (mantener pulsado) ---- */
+/* ---- Controladores VR: modelos visibles + gatillo para hablar (toca para iniciar/parar) ---- */
 const controllerModelFactory = new XRControllerModelFactory();
 const rayGeometry = new THREE.BufferGeometry().setFromPoints([
   new THREE.Vector3(0, 0, 0),
@@ -844,8 +844,7 @@ const rayGeometry = new THREE.BufferGeometry().setFromPoints([
 function setupControllers() {
   for (let i = 0; i < 2; i++) {
     const controller = renderer.xr.getController(i);
-    controller.addEventListener("selectstart", () => startRecording());
-    controller.addEventListener("selectend", () => stopRecording());
+    controller.addEventListener("selectstart", () => toggleRecording());
     const ray = new THREE.Line(rayGeometry, new THREE.LineBasicMaterial({ color: 0x3fa9ff, transparent: true, opacity: 0.6 }));
     ray.scale.z = 1.2;
     controller.add(ray);
@@ -867,6 +866,20 @@ setupControllers();
 let micStream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
+let recordingStartTime = 0;
+let silenceRAF = null;
+
+const MIN_RECORDING_MS = 500;
+const MAX_RECORDING_MS = 30000;
+const SILENCE_DURATION_MS = 1500;
+const SILENCE_RMS_THRESHOLD = 0.02;
+
+// Toca una vez para empezar a hablar, toca de nuevo para terminar antes de tiempo.
+// Si no la vuelves a tocar, se detiene sola en cuanto detecta que dejaste de hablar.
+function toggleRecording() {
+  if (state.isRecording) stopRecording();
+  else startRecording();
+}
 
 async function startRecording() {
   if (state.isBusy || state.isRecording) return;
@@ -885,21 +898,55 @@ async function startRecording() {
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
     mediaRecorder.start();
     state.isRecording = true;
+    recordingStartTime = Date.now();
     micBtn.classList.add("recording");
-    setStatus("Escuchando…");
+    setStatus("Escuchando… (se detiene sola al terminar de hablar)");
+    watchForSilence();
   } catch (err) {
     setStatus("No se pudo acceder al micrófono: " + err.message + ". Usa el campo de texto.");
     typeFallback.style.display = "flex";
   }
 }
 
+function watchForSilence() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(micStream);
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  let silenceStart = null;
+
+  function tick() {
+    if (!state.isRecording) { source.disconnect(); return; }
+    analyser.getByteTimeDomainData(data);
+    let sumSq = 0;
+    for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
+    const rms = Math.sqrt(sumSq / data.length);
+    const elapsed = Date.now() - recordingStartTime;
+
+    if (elapsed > MAX_RECORDING_MS) { source.disconnect(); stopRecording(); return; }
+    if (elapsed > MIN_RECORDING_MS) {
+      if (rms < SILENCE_RMS_THRESHOLD) {
+        if (silenceStart === null) silenceStart = Date.now();
+        else if (Date.now() - silenceStart > SILENCE_DURATION_MS) { source.disconnect(); stopRecording(); return; }
+      } else {
+        silenceStart = null;
+      }
+    }
+    silenceRAF = requestAnimationFrame(tick);
+  }
+  tick();
+}
+
 function stopRecording() {
   if (!mediaRecorder || !state.isRecording) return;
   state.isRecording = false;
+  if (silenceRAF) cancelAnimationFrame(silenceRAF);
   micBtn.classList.remove("recording");
   mediaRecorder.onstop = async () => {
     const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
-    if (blob.size < 400) { setStatus("No se detectó audio. Mantén pulsado el micro/gatillo más tiempo."); return; }
+    if (blob.size < 400) { setStatus("No se detectó audio. Toca el micro/gatillo e inténtalo de nuevo."); return; }
     setStatus("Procesando audio…");
     try {
       const wavBlob = await encodeBlobAsWav(blob);
@@ -957,11 +1004,7 @@ function pcmToWav(samples, sampleRate) {
   return buffer;
 }
 
-micBtn.addEventListener("mousedown", startRecording);
-micBtn.addEventListener("touchstart", (e) => { e.preventDefault(); startRecording(); });
-micBtn.addEventListener("mouseup", stopRecording);
-micBtn.addEventListener("touchend", (e) => { e.preventDefault(); stopRecording(); });
-micBtn.addEventListener("mouseleave", stopRecording);
+micBtn.addEventListener("click", toggleRecording);
 
 typeSend.addEventListener("click", () => {
   const text = typeInput.value.trim();
@@ -1021,7 +1064,7 @@ async function handleConvaiReply(data) {
   if (data.audio) {
     await playBase64Audio(data.audio, data.sample_rate);
   }
-  setStatus("Listo. Mantén pulsado el micro/gatillo para hablar.");
+  setStatus("Listo. Toca el micro/gatillo para hablar.");
   return replyText;
 }
 
