@@ -959,22 +959,26 @@ function stopRecording() {
   mediaRecorder.stop();
 }
 
+// Convai espera audio mono; muchos motores de voz asumen 16kHz, así que
+// remuestreamos aquí en vez de mandar la frecuencia nativa del micrófono
+// (44.1kHz/48kHz), que puede no ser la que su backend espera.
+const CONVAI_SAMPLE_RATE = 16000;
+
 async function encodeBlobAsWav(blob) {
   const arrayBuf = await blob.arrayBuffer();
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const audioBuffer = await ctx.decodeAudioData(arrayBuf);
-  const samples = audioBuffer.numberOfChannels > 1 ? mixToMono(audioBuffer) : audioBuffer.getChannelData(0);
-  const wavArrayBuffer = pcmToWav(samples, audioBuffer.sampleRate);
-  ctx.close();
-  return new Blob([wavArrayBuffer], { type: "audio/wav" });
-}
+  const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const decoded = await tempCtx.decodeAudioData(arrayBuf);
+  tempCtx.close();
 
-function mixToMono(buffer) {
-  const ch0 = buffer.getChannelData(0);
-  const ch1 = buffer.getChannelData(1);
-  const out = new Float32Array(ch0.length);
-  for (let i = 0; i < ch0.length; i++) out[i] = (ch0[i] + ch1[i]) / 2;
-  return out;
+  const offlineCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * CONVAI_SAMPLE_RATE), CONVAI_SAMPLE_RATE);
+  const source = offlineCtx.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offlineCtx.destination);
+  source.start();
+  const rendered = await offlineCtx.startRendering();
+
+  const wavArrayBuffer = pcmToWav(rendered.getChannelData(0), CONVAI_SAMPLE_RATE);
+  return new Blob([wavArrayBuffer], { type: "audio/wav" });
 }
 
 function pcmToWav(samples, sampleRate) {
@@ -1052,7 +1056,14 @@ async function callConvai(form) {
     headers: { "CONVAI-API-KEY": state.apiKey },
     body: form,
   });
-  if (!res.ok) throw new Error("HTTP " + res.status);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const errData = await res.json();
+      detail = errData && errData.text ? " — " + errData.text : "";
+    } catch (_) { /* la respuesta de error no era JSON */ }
+    throw new Error("HTTP " + res.status + detail);
+  }
   return res.json();
 }
 
@@ -1115,6 +1126,7 @@ async function sendUserAudio(wavBlob) {
     form.append("charID", state.charId);
     form.append("sessionID", state.sessionId);
     form.append("voiceResponse", "True");
+    form.append("sample_rate", String(CONVAI_SAMPLE_RATE));
     const data = await callConvai(form);
     return await handleConvaiReply(data);
   } catch (err) {
