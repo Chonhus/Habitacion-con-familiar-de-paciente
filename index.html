@@ -159,6 +159,7 @@ import * as THREE from "three";
 import { VRButton } from "three/addons/webxr/VRButton.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { XRControllerModelFactory } from "three/addons/webxr/XRControllerModelFactory.js";
 
 /* ---------------------------------------------------------------------
    Estado / configuración
@@ -233,6 +234,33 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.02).texture;
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
 camera.position.set(0, 1.6, 2.5);
+scene.add(camera); // necesario para que el HUD anclado a la cámara se renderice dentro de la escena
+
+/* ---- HUD en mundo 3D anclado a la vista (visible dentro del casco, sin depender de dom-overlay) ---- */
+const hudCanvas = document.createElement("canvas");
+hudCanvas.width = 900; hudCanvas.height = 220;
+const hudCtx = hudCanvas.getContext("2d");
+const hudTexture = new THREE.CanvasTexture(hudCanvas);
+const hudMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, depthTest: false });
+const hudPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.122), hudMat);
+hudPlane.position.set(0, -0.24, -0.6);
+hudPlane.renderOrder = 999;
+camera.add(hudPlane);
+
+function drawHud(statusText) {
+  hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+  hudCtx.fillStyle = "rgba(10,12,16,0.78)";
+  roundRect(hudCtx, 6, 6, hudCanvas.width - 12, hudCanvas.height - 12, 26);
+  hudCtx.fill();
+  hudCtx.fillStyle = "#eef1f6";
+  hudCtx.font = "600 34px sans-serif";
+  wrapText(hudCtx, statusText, 30, 60, hudCanvas.width - 60, 42);
+  hudCtx.fillStyle = "#7fb2ff";
+  hudCtx.font = "26px sans-serif";
+  hudCtx.fillText("Mantén pulsado el gatillo del mando para hablar", 30, hudCanvas.height - 34);
+  hudTexture.needsUpdate = true;
+}
+drawHud("Cargando...");
 
 // Luces (habitación bien iluminada, luz cálida de techo + luz de ventana)
 scene.add(new THREE.HemisphereLight(0xf3f6fa, 0xe9e4d8, 0.8));
@@ -770,6 +798,7 @@ let idleT = 0;
 
 function render(time, frame) {
   idleT += 0.016;
+  hudPlane.visible = renderer.xr.isPresenting;
   avatar.rotation.y = Math.sin(idleT * 0.25) * 0.08;
   ring.material.opacity = 0.35 + Math.sin(idleT * 2) * 0.15;
 
@@ -801,18 +830,30 @@ if ("xr" in navigator) {
     domOverlay: { root: document.getElementById("overlay") },
   });
   el("vr-btn-slot").appendChild(vrButton);
-  statusChip.textContent = "Escena lista. Pulsa \"ENTER VR\" en tu Quest.";
+  setStatus("Escena lista. Pulsa \"ENTER VR\" en tu Quest.");
 } else {
-  statusChip.textContent = "WebXR no disponible en este navegador (prueba en el navegador de Meta Quest).";
+  setStatus("WebXR no disponible en este navegador (prueba en el navegador de Meta Quest).");
 }
 
-/* ---- Controlador VR: gatillo = mantener pulsado para hablar ---- */
+/* ---- Controladores VR: modelos visibles + gatillo para hablar (mantener pulsado) ---- */
+const controllerModelFactory = new XRControllerModelFactory();
+const rayGeometry = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(0, 0, 0),
+  new THREE.Vector3(0, 0, -1),
+]);
 function setupControllers() {
   for (let i = 0; i < 2; i++) {
     const controller = renderer.xr.getController(i);
     controller.addEventListener("selectstart", () => startRecording());
     controller.addEventListener("selectend", () => stopRecording());
+    const ray = new THREE.Line(rayGeometry, new THREE.LineBasicMaterial({ color: 0x3fa9ff, transparent: true, opacity: 0.6 }));
+    ray.scale.z = 1.2;
+    controller.add(ray);
     scene.add(controller);
+
+    const grip = renderer.xr.getControllerGrip(i);
+    grip.add(controllerModelFactory.createControllerModel(grip));
+    scene.add(grip);
   }
 }
 setupControllers();
@@ -892,7 +933,10 @@ function validateConfig() {
   return true;
 }
 
-function setStatus(text) { statusChip.textContent = text; }
+function setStatus(text) {
+  statusChip.textContent = text;
+  drawHud(text);
+}
 
 function showSubtitle(who, text) {
   subtitleWho.textContent = who;
@@ -1035,4 +1079,3 @@ if ("serviceWorker" in navigator) {
 </script>
 </body>
 </html>
-
