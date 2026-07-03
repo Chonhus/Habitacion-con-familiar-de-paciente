@@ -116,7 +116,7 @@
       <span id="subtitle-text"></span>
     </div>
 
-    <div id="type-fallback" style="display:none;">
+    <div id="type-fallback">
       <input id="type-input" type="text" placeholder="Escribe tu mensaje (alternativa a voz)…" />
       <button id="type-send">Enviar</button>
     </div>
@@ -859,46 +859,102 @@ function setupControllers() {
 setupControllers();
 
 /* ---------------------------------------------------------------------
-   Reconocimiento de voz (Web Speech API) + fallback de texto
+   Grabación de voz (MediaRecorder + WAV) — funciona en más navegadores
+   que el reconocimiento de voz nativo (que no está disponible en el
+   navegador de Meta Quest). El audio se manda a Convai, que hace la
+   transcripción y la conversación en un único paso.
 --------------------------------------------------------------------- */
-const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+let micStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
 
-function startRecording() {
+async function startRecording() {
   if (state.isBusy || state.isRecording) return;
   if (!validateConfig()) return;
-  if (!SpeechRecognitionImpl) {
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
     typeFallback.style.display = "flex";
-    setStatus("Reconocimiento de voz no disponible aquí. Usa el campo de texto.");
+    setStatus("Este navegador no permite grabar audio. Usa el campo de texto.");
     return;
   }
-  const rec = new SpeechRecognitionImpl();
-  rec.lang = "es-ES";
-  rec.interimResults = false;
-  rec.maxAlternatives = 1;
-  rec.onstart = () => {
+  try {
+    if (!micStream) {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(micStream);
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.start();
     state.isRecording = true;
     micBtn.classList.add("recording");
     setStatus("Escuchando…");
-  };
-  rec.onresult = (e) => {
-    const text = e.results[0][0].transcript;
-    sendUserMessage(text);
-  };
-  rec.onerror = (e) => {
-    setStatus("Error de reconocimiento de voz: " + e.error + ". Prueba el campo de texto.");
+  } catch (err) {
+    setStatus("No se pudo acceder al micrófono: " + err.message + ". Usa el campo de texto.");
     typeFallback.style.display = "flex";
-  };
-  rec.onend = () => {
-    state.isRecording = false;
-    micBtn.classList.remove("recording");
-  };
-  state.recognizer = rec;
-  rec.start();
-}
-function stopRecording() {
-  if (state.recognizer && state.isRecording) {
-    state.recognizer.stop();
   }
+}
+
+function stopRecording() {
+  if (!mediaRecorder || !state.isRecording) return;
+  state.isRecording = false;
+  micBtn.classList.remove("recording");
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+    if (blob.size < 400) { setStatus("No se detectó audio. Mantén pulsado el micro/gatillo más tiempo."); return; }
+    setStatus("Procesando audio…");
+    try {
+      const wavBlob = await encodeBlobAsWav(blob);
+      await sendUserAudio(wavBlob);
+    } catch (e) {
+      console.error(e);
+      setStatus("Error procesando el audio: " + e.message);
+    }
+  };
+  mediaRecorder.stop();
+}
+
+async function encodeBlobAsWav(blob) {
+  const arrayBuf = await blob.arrayBuffer();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const audioBuffer = await ctx.decodeAudioData(arrayBuf);
+  const samples = audioBuffer.numberOfChannels > 1 ? mixToMono(audioBuffer) : audioBuffer.getChannelData(0);
+  const wavArrayBuffer = pcmToWav(samples, audioBuffer.sampleRate);
+  ctx.close();
+  return new Blob([wavArrayBuffer], { type: "audio/wav" });
+}
+
+function mixToMono(buffer) {
+  const ch0 = buffer.getChannelData(0);
+  const ch1 = buffer.getChannelData(1);
+  const out = new Float32Array(ch0.length);
+  for (let i = 0; i < ch0.length; i++) out[i] = (ch0[i] + ch1[i]) / 2;
+  return out;
+}
+
+function pcmToWav(samples, sampleRate) {
+  const bytesPerSample = 2;
+  const dataSize = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeString = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
 }
 
 micBtn.addEventListener("mousedown", startRecording);
@@ -947,6 +1003,28 @@ function showSubtitle(who, text) {
 
 const transcriptLog = [];
 
+async function callConvai(form) {
+  const res = await fetch("https://api.convai.com/character/getResponse", {
+    method: "POST",
+    headers: { "CONVAI-API-KEY": state.apiKey },
+    body: form,
+  });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function handleConvaiReply(data) {
+  if (data.sessionID) state.sessionId = data.sessionID;
+  const replyText = data.text || "(sin respuesta de texto)";
+  showSubtitle("Avatar", replyText);
+  transcriptLog.push({ role: "avatar", text: replyText });
+  if (data.audio) {
+    await playBase64Audio(data.audio, data.sample_rate);
+  }
+  setStatus("Listo. Mantén pulsado el micro/gatillo para hablar.");
+  return replyText;
+}
+
 async function sendUserMessage(text, { silent = false } = {}) {
   if (!validateConfig()) return null;
   state.isBusy = true;
@@ -965,26 +1043,37 @@ async function sendUserMessage(text, { silent = false } = {}) {
     form.append("charID", state.charId);
     form.append("sessionID", state.sessionId);
     form.append("voiceResponse", "True");
+    const data = await callConvai(form);
+    return await handleConvaiReply(data);
+  } catch (err) {
+    console.error(err);
+    setStatus("Error al contactar con Convai: " + err.message);
+    return null;
+  } finally {
+    state.isBusy = false;
+    micBtn.classList.remove("busy");
+    micBtn.disabled = false;
+  }
+}
 
-    const res = await fetch("https://api.convai.com/character/getResponse", {
-      method: "POST",
-      headers: { "CONVAI-API-KEY": state.apiKey },
-      body: form,
-    });
+async function sendUserAudio(wavBlob) {
+  if (!validateConfig()) return null;
+  state.isBusy = true;
+  micBtn.classList.add("busy");
+  micBtn.disabled = true;
+  showSubtitle("Tú", "(mensaje de voz)");
+  transcriptLog.push({ role: "user", text: "(mensaje de voz)" });
+  state.turns++;
+  setStatus("Consultando al avatar…");
 
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-
-    if (data.sessionID) state.sessionId = data.sessionID;
-    const replyText = data.text || "(sin respuesta de texto)";
-    showSubtitle("Avatar", replyText);
-    transcriptLog.push({ role: "avatar", text: replyText });
-
-    if (data.audio) {
-      await playBase64Audio(data.audio, data.sample_rate);
-    }
-    setStatus("Listo. Mantén pulsado el micro para hablar.");
-    return replyText;
+  try {
+    const form = new FormData();
+    form.append("file", wavBlob, "input.wav");
+    form.append("charID", state.charId);
+    form.append("sessionID", state.sessionId);
+    form.append("voiceResponse", "True");
+    const data = await callConvai(form);
+    return await handleConvaiReply(data);
   } catch (err) {
     console.error(err);
     setStatus("Error al contactar con Convai: " + err.message);
