@@ -122,7 +122,7 @@
     </div>
 
     <div id="controls-row">
-      <button id="mic-btn" title="Toca para hablar (se detiene sola al terminar)">🎙️</button>
+      <button id="mic-btn" title="Toca para empezar, toca de nuevo para terminar">🎙️</button>
       <div id="vr-btn-slot"></div>
       <button id="end-btn">Finalizar y ver feedback</button>
     </div>
@@ -219,6 +219,9 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
+// Sin esto, la altura "0" de WebXR puede no coincidir con tu suelo físico
+// real, haciendo que la escena se vea desde más arriba/abajo de lo debido.
+renderer.xr.setReferenceSpaceType("local-floor");
 renderer.setClearColor(0x0a0c10);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -257,7 +260,7 @@ function drawHud(statusText) {
   wrapText(hudCtx, statusText, 30, 60, hudCanvas.width - 60, 42);
   hudCtx.fillStyle = "#7fb2ff";
   hudCtx.font = "26px sans-serif";
-  hudCtx.fillText("Toca el gatillo para hablar (se detiene solo al terminar)", 30, hudCanvas.height - 34);
+  hudCtx.fillText("Toca el gatillo para hablar y vuelve a tocarlo al terminar", 30, hudCanvas.height - 34);
   hudTexture.needsUpdate = true;
 }
 drawHud("Cargando...");
@@ -869,10 +872,10 @@ let recordedChunks = [];
 let recordingStartTime = 0;
 let silenceRAF = null;
 
-const MIN_RECORDING_MS = 500;
-const MAX_RECORDING_MS = 30000;
-const SILENCE_DURATION_MS = 1500;
-const SILENCE_RMS_THRESHOLD = 0.02;
+const MIN_RECORDING_MS = 1500;
+const MAX_RECORDING_MS = 45000;
+const SILENCE_DURATION_MS = 4000;
+const SILENCE_RMS_THRESHOLD = 0.008;
 
 // Toca una vez para empezar a hablar, toca de nuevo para terminar antes de tiempo.
 // Si no la vuelves a tocar, se detiene sola en cuanto detecta que dejaste de hablar.
@@ -900,7 +903,7 @@ async function startRecording() {
     state.isRecording = true;
     recordingStartTime = Date.now();
     micBtn.classList.add("recording");
-    setStatus("Escuchando… (se detiene sola al terminar de hablar)");
+    setStatus("Escuchando… toca de nuevo el micro/gatillo cuando termines.");
     watchForSilence();
   } catch (err) {
     setStatus("No se pudo acceder al micrófono: " + err.message + ". Usa el campo de texto.");
