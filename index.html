@@ -108,6 +108,10 @@
       y copia su URL). Si lo dejas vacío, se usa un muñeco simple de reemplazo.
     </div>
     <div id="avatar-status" style="font-size:11px;margin-top:4px;color:#7fd88f;min-height:14px;"></div>
+
+    <label style="margin-top:14px;">Prueba de micrófono (diagnóstico)</label>
+    <button id="mic-test-btn" style="background:#4a5262;color:#fff;width:100%;padding:10px;">🔊 Grabar y reproducirme a mí mismo</button>
+    <div id="mic-test-status" style="font-size:11px;margin-top:6px;color:#9aa4b2;min-height:14px;"></div>
   </div>
 
   <div id="hud-bottom">
@@ -1024,6 +1028,50 @@ function pcmToWav(samples, sampleRate) {
   return buffer;
 }
 
+/* ---- Prueba de micrófono independiente: graba y te reproduce a ti mismo ---- */
+const micTestBtn = el("mic-test-btn");
+const micTestStatus = el("mic-test-status");
+let micTestRecorder = null;
+let micTestChunks = [];
+let micTestActive = false;
+
+micTestBtn.addEventListener("click", async () => {
+  if (micTestActive) {
+    micTestActive = false;
+    micTestBtn.textContent = "🔊 Grabar y reproducirme a mí mismo";
+    micTestRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micTestChunks = [];
+    micTestRecorder = new MediaRecorder(stream);
+    micTestRecorder.ondataavailable = (e) => { if (e.data.size > 0) micTestChunks.push(e.data); };
+    micTestRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const rawBlob = new Blob(micTestChunks, { type: micTestRecorder.mimeType || "audio/webm" });
+      micTestStatus.textContent = `Grabado (${(rawBlob.size / 1024).toFixed(1)} KB). Codificando y reproduciendo…`;
+      try {
+        const wavBlob = await encodeBlobAsWav(rawBlob);
+        const url = URL.createObjectURL(wavBlob);
+        const audioEl = new Audio(url);
+        audioEl.onended = () => { micTestStatus.textContent = "Prueba terminada. ¿Se oía tu voz con claridad?"; URL.revokeObjectURL(url); };
+        audioEl.onerror = () => { micTestStatus.textContent = "No se pudo reproducir el audio codificado."; };
+        await audioEl.play();
+        micTestStatus.textContent = "Reproduciendo lo que se grabó…";
+      } catch (e) {
+        micTestStatus.textContent = "Error codificando el audio: " + e.message;
+      }
+    };
+    micTestRecorder.start();
+    micTestActive = true;
+    micTestBtn.textContent = "⏹️ Toca para detener la grabación de prueba";
+    micTestStatus.textContent = "Grabando… habla ahora y toca el botón de nuevo para parar.";
+  } catch (err) {
+    micTestStatus.textContent = "No se pudo acceder al micrófono: " + err.message;
+  }
+});
+
 micBtn.addEventListener("click", toggleRecording);
 
 typeSend.addEventListener("click", () => {
@@ -1184,58 +1232,4 @@ function playBase64Audio(base64, sampleRateHint) {
         raf = requestAnimationFrame(tick);
       }
       audioEl.onplay = () => { audioCtx.resume(); tick(); };
-      audioEl.onended = () => { cancelAnimationFrame(raf); mouthAmplitude = 0; URL.revokeObjectURL(url); resolve(); };
-      audioEl.onerror = () => { cancelAnimationFrame(raf); mouthAmplitude = 0; resolve(); };
-      audioEl.play().catch(() => resolve());
-    } catch (e) {
-      console.warn("No se pudo reproducir el audio:", e);
-      resolve();
-    }
-  });
-}
-
-/* ---------------------------------------------------------------------
-   Sesión / Feedback final
---------------------------------------------------------------------- */
-state.sessionStart = Date.now();
-
-endBtn.addEventListener("click", async () => {
-  if (!validateConfig()) return;
-  const feedbackPanel = el("feedback-panel");
-  const avatarFeedbackText = el("avatar-feedback-text");
-  const durationEl = el("metric-duration");
-  const turnsEl = el("metric-turns");
-  const rangeEl = el("feedback-timerange");
-
-  const elapsedMs = Date.now() - state.sessionStart;
-  const mm = String(Math.floor(elapsedMs / 60000)).padStart(2, "0");
-  const ss = String(Math.floor((elapsedMs % 60000) / 1000)).padStart(2, "0");
-  durationEl.textContent = `${mm}:${ss}`;
-  turnsEl.textContent = String(state.turns);
-  rangeEl.textContent = `${new Date(state.sessionStart).toLocaleTimeString()} – ${new Date().toLocaleTimeString()}`;
-  avatarFeedbackText.textContent = "Generando feedback…";
-  feedbackPanel.classList.add("visible");
-
-  const feedbackPrompt = state.turns > 0
-    ? "La interacción ha terminado. Por favor, dame un feedback breve (máx. 4 frases) sobre cómo ha ido nuestra conversación, qué destacarías de mi forma de comunicarme y una sugerencia de mejora."
-    : "No hemos llegado a conversar. Dime en una frase que no hay suficiente interacción para dar feedback.";
-
-  const reply = await sendUserMessage(feedbackPrompt, { silent: true });
-  avatarFeedbackText.textContent = reply || "No se pudo obtener el feedback del avatar (revisa la API key y la conexión).";
-});
-
-el("feedback-close").addEventListener("click", () => {
-  el("feedback-panel").classList.remove("visible");
-});
-
-/* ---- PWA: registro del service worker (permite "Añadir a inicio" en Quest) ---- */
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch((err) => {
-      console.warn("No se pudo registrar el service worker:", err);
-    });
-  });
-}
-</script>
-</body>
-</html>
+      audioEl.onended = () => { cancelAnimationFrame(raf); mouthAmplitude = 0
