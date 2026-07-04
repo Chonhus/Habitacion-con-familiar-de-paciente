@@ -882,15 +882,15 @@ let micStream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordingStartTime = 0;
-let silenceRAF = null;
+let maxDurationTimer = null;
 
-const MIN_RECORDING_MS = 1500;
 const MAX_RECORDING_MS = 45000;
-const SILENCE_DURATION_MS = 4000;
-const SILENCE_RMS_THRESHOLD = 0.008;
 
-// Toca una vez para empezar a hablar, toca de nuevo para terminar antes de tiempo.
-// Si no la vuelves a tocar, se detiene sola en cuanto detecta que dejaste de hablar.
+// Toca una vez para empezar a hablar, toca de nuevo para terminar — control
+// 100% manual (igual que la prueba de micrófono, que ya sabemos que funciona
+// bien). Sin corte automático por silencio: resultó cortar la grabación
+// real demasiado pronto. Solo hay un tope de seguridad por si se te olvida
+// tocarlo de nuevo.
 function toggleRecording() {
   if (state.isRecording) stopRecording();
   else startRecording();
@@ -917,48 +917,17 @@ async function startRecording() {
     recordingStartTime = Date.now();
     micBtn.classList.add("recording");
     setStatus("Escuchando… toca de nuevo el micro/gatillo cuando termines.");
-    watchForSilence();
+    maxDurationTimer = setTimeout(stopRecording, MAX_RECORDING_MS);
   } catch (err) {
     setStatus("No se pudo acceder al micrófono: " + err.message + ". Usa el campo de texto.");
     typeFallback.style.display = "flex";
   }
 }
 
-function watchForSilence() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = audioCtx.createMediaStreamSource(micStream);
-  const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 512;
-  source.connect(analyser);
-  const data = new Uint8Array(analyser.frequencyBinCount);
-  let silenceStart = null;
-
-  function tick() {
-    if (!state.isRecording) { source.disconnect(); return; }
-    analyser.getByteTimeDomainData(data);
-    let sumSq = 0;
-    for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
-    const rms = Math.sqrt(sumSq / data.length);
-    const elapsed = Date.now() - recordingStartTime;
-
-    if (elapsed > MAX_RECORDING_MS) { source.disconnect(); stopRecording(); return; }
-    if (elapsed > MIN_RECORDING_MS) {
-      if (rms < SILENCE_RMS_THRESHOLD) {
-        if (silenceStart === null) silenceStart = Date.now();
-        else if (Date.now() - silenceStart > SILENCE_DURATION_MS) { source.disconnect(); stopRecording(); return; }
-      } else {
-        silenceStart = null;
-      }
-    }
-    silenceRAF = requestAnimationFrame(tick);
-  }
-  tick();
-}
-
 function stopRecording() {
   if (!mediaRecorder || !state.isRecording) return;
   state.isRecording = false;
-  if (silenceRAF) cancelAnimationFrame(silenceRAF);
+  if (maxDurationTimer) clearTimeout(maxDurationTimer);
   micBtn.classList.remove("recording");
   const recordedSeconds = ((Date.now() - recordingStartTime) / 1000).toFixed(1);
   mediaRecorder.onstop = async () => {
