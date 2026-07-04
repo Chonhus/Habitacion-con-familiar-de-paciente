@@ -666,6 +666,14 @@ placeholderRig.traverse((obj) => {
   if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = false; }
 });
 
+// Escalamos el muñeco de reemplazo a una altura humana realista (1.80 m)
+{
+  const box = new THREE.Box3().setFromObject(placeholderRig);
+  const currentHeight = box.max.y - box.min.y;
+  const targetHeight = 1.8;
+  placeholderRig.scale.setScalar(targetHeight / currentHeight);
+}
+
 // Base / plataforma con brillo (indica "IA activa") — se muestra con cualquier avatar
 const base = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.42, 0.04, 32), accent);
 base.position.y = 0.02;
@@ -893,9 +901,10 @@ async function startRecording() {
     return;
   }
   try {
-    if (!micStream) {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    }
+    // Pedimos un flujo de micrófono nuevo cada vez (en lugar de reutilizar uno
+    // cacheado) para evitar que un stream inactivo/degradado capture poco o
+    // nada de audio en grabaciones posteriores.
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     recordedChunks = [];
     mediaRecorder = new MediaRecorder(micStream);
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
@@ -947,10 +956,14 @@ function stopRecording() {
   state.isRecording = false;
   if (silenceRAF) cancelAnimationFrame(silenceRAF);
   micBtn.classList.remove("recording");
+  const recordedSeconds = ((Date.now() - recordingStartTime) / 1000).toFixed(1);
   mediaRecorder.onstop = async () => {
+    // Liberamos el micrófono por completo para que la próxima grabación
+    // empiece con un flujo fresco, no uno que lleve rato inactivo.
+    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
     const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
     if (blob.size < 400) { setStatus("No se detectó audio. Toca el micro/gatillo e inténtalo de nuevo."); return; }
-    setStatus("Procesando audio…");
+    setStatus(`Procesando audio… (${recordedSeconds} s grabados)`);
     try {
       const wavBlob = await encodeBlobAsWav(blob);
       await sendUserAudio(wavBlob);
