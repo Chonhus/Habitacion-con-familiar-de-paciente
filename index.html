@@ -1232,4 +1232,58 @@ function playBase64Audio(base64, sampleRateHint) {
         raf = requestAnimationFrame(tick);
       }
       audioEl.onplay = () => { audioCtx.resume(); tick(); };
-      audioEl.onended = () => { cancelAnimationFrame(raf); mouthAmplitude = 0
+      audioEl.onended = () => { cancelAnimationFrame(raf); mouthAmplitude = 0; URL.revokeObjectURL(url); resolve(); };
+      audioEl.onerror = () => { cancelAnimationFrame(raf); mouthAmplitude = 0; resolve(); };
+      audioEl.play().catch(() => resolve());
+    } catch (e) {
+      console.warn("No se pudo reproducir el audio:", e);
+      resolve();
+    }
+  });
+}
+
+/* ---------------------------------------------------------------------
+   Sesión / Feedback final
+--------------------------------------------------------------------- */
+state.sessionStart = Date.now();
+
+endBtn.addEventListener("click", async () => {
+  if (!validateConfig()) return;
+  const feedbackPanel = el("feedback-panel");
+  const avatarFeedbackText = el("avatar-feedback-text");
+  const durationEl = el("metric-duration");
+  const turnsEl = el("metric-turns");
+  const rangeEl = el("feedback-timerange");
+
+  const elapsedMs = Date.now() - state.sessionStart;
+  const mm = String(Math.floor(elapsedMs / 60000)).padStart(2, "0");
+  const ss = String(Math.floor((elapsedMs % 60000) / 1000)).padStart(2, "0");
+  durationEl.textContent = `${mm}:${ss}`;
+  turnsEl.textContent = String(state.turns);
+  rangeEl.textContent = `${new Date(state.sessionStart).toLocaleTimeString()} – ${new Date().toLocaleTimeString()}`;
+  avatarFeedbackText.textContent = "Generando feedback…";
+  feedbackPanel.classList.add("visible");
+
+  const feedbackPrompt = state.turns > 0
+    ? "La interacción ha terminado. Por favor, dame un feedback breve (máx. 4 frases) sobre cómo ha ido nuestra conversación, qué destacarías de mi forma de comunicarme y una sugerencia de mejora."
+    : "No hemos llegado a conversar. Dime en una frase que no hay suficiente interacción para dar feedback.";
+
+  const reply = await sendUserMessage(feedbackPrompt, { silent: true });
+  avatarFeedbackText.textContent = reply || "No se pudo obtener el feedback del avatar (revisa la API key y la conexión).";
+});
+
+el("feedback-close").addEventListener("click", () => {
+  el("feedback-panel").classList.remove("visible");
+});
+
+/* ---- PWA: registro del service worker (permite "Añadir a inicio" en Quest) ---- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((err) => {
+      console.warn("No se pudo registrar el service worker:", err);
+    });
+  });
+}
+</script>
+</body>
+</html>
